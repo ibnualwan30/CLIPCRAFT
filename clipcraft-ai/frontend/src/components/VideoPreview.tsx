@@ -279,6 +279,133 @@ ${fallbackText.slice(0, 200)}...`);
     });
   };
 
+  // TAMBAHKAN FUNCTIONS INI SETELAH function getViralPotential
+
+// Download single clip
+const downloadClip = async (clip: ClipData) => {
+  if (!videoId) {
+    alert('Video ID not available');
+    return;
+  }
+
+  setDownloadingClips(prev => new Set(prev).add(clip.clip_id));
+
+  try {
+    const response = await fetch('http://localhost:8001/api/download-clip', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        video_id: videoId,
+        clip_id: clip.clip_id,
+        title: clip.title,
+        start_time: clip.start_time,
+        end_time: clip.end_time,
+        format: 'mp4'
+      }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      window.open(result.youtube_url, '_blank');
+      alert(`✅ Clip download prepared!\n\n🔗 ${result.youtube_url}`);
+    } else {
+      throw new Error(result.error || 'Download preparation failed');
+    }
+  } catch (error) {
+    console.error('Download failed:', error);
+    alert(`❌ Download failed: ${error}`);
+  } finally {
+    setDownloadingClips(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(clip.clip_id);
+      return newSet;
+    });
+  }
+};
+
+// Download all clips
+const downloadAllClips = async () => {
+  if (!videoId || clips.length === 0) {
+    alert('No clips available for download');
+    return;
+  }
+
+  setBatchDownloading(true);
+
+  try {
+    const response = await fetch('http://localhost:8001/api/download-batch', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        video_id: videoId,
+        clips: clips,
+        format: 'mp4'
+      }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      result.clips.forEach((clipInfo: any, index: number) => {
+        setTimeout(() => {
+          window.open(clipInfo.youtube_url, '_blank');
+        }, index * 1000);
+      });
+
+      alert(`✅ Batch download prepared!\n\n📊 ${result.total_clips} clips ready`);
+    } else {
+      throw new Error('Batch download preparation failed');
+    }
+  } catch (error) {
+    console.error('Batch download failed:', error);
+    alert(`❌ Batch download failed: ${error}`);
+  } finally {
+    setBatchDownloading(false);
+  }
+};
+
+// Copy timestamps
+const copyTimestamps = async () => {
+  if (!videoId) {
+    alert('Video ID not available');
+    return;
+  }
+
+  setCopyingTimestamps(true);
+
+  try {
+    const response = await fetch('http://localhost:8001/api/copy-timestamps', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        video_id: videoId,
+        clips: clips
+      }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      await navigator.clipboard.writeText(result.timestamp_text);
+      alert(`✅ Timestamps copied!\n\n📋 ${result.total_clips} clips included`);
+    } else {
+      throw new Error('Failed to generate timestamps');
+    }
+  } catch (error) {
+    console.error('Copy timestamps failed:', error);
+    alert(`❌ Copy failed: ${error}`);
+  } finally {
+    setCopyingTimestamps(false);
+  }
+};
+
   return (
     <div className="space-y-6">
       {/* Success Header */}
