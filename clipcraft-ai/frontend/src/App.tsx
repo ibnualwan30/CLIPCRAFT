@@ -1,5 +1,5 @@
 // File: frontend/src/App.tsx
-// Complete App.tsx dengan VideoPreview integration
+// UPDATE: Perbaikan kecil untuk integrasi dengan VideoPreview yang baru
 
 import React, { useState, useEffect } from 'react';
 import { Play, Sparkles, Brain, Scissors, Type, Smartphone, Zap, Palette, CheckCircle, XCircle, Clock } from 'lucide-react';
@@ -25,118 +25,170 @@ const App: React.FC = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Test backend connection on mount
+  // Test backend connection on mount - UPDATE: Lebih robust error handling
   useEffect(() => {
     const testConnection = async () => {
       try {
+        console.log('🔗 Testing backend connection...');
         const response = await fetch('http://localhost:8001/api/health');
+        
         if (response.ok) {
+          const data = await response.json();
           setIsConnected(true);
+          console.log('✅ Backend connected successfully:', data.message);
         } else {
           setIsConnected(false);
+          console.log('❌ Backend responded with error:', response.status);
         }
       } catch (error) {
         setIsConnected(false);
-        console.error('Backend connection failed:', error);
+        console.error('❌ Backend connection failed:', error);
       }
     };
     
     testConnection();
+    
+    // Re-test connection every 30 seconds if disconnected
+    const interval = setInterval(() => {
+      if (isConnected === false) {
+        testConnection();
+      }
+    }, 30000);
+    
+    return () => clearInterval(interval);
   }, []);
 
-  // Poll job status when processing
+  // Poll job status when processing - UPDATE: Better error handling
   useEffect(() => {
     let interval: NodeJS.Timeout;
     
     if (jobId && isProcessing) {
+      console.log('📊 Starting status polling for job:', jobId);
+      
       interval = setInterval(async () => {
         try {
           const response = await fetch(`http://localhost:8001/api/status/${jobId}`);
           const status = await response.json();
           setJobStatus(status);
           
+          console.log(`📈 Job progress: ${status.progress}% - ${status.current_step}`);
+          
           if (status.status === 'completed') {
             setIsProcessing(false);
+            console.log('🎉 Processing completed successfully!');
+            
             // Get final result
             try {
               const resultResponse = await fetch(`http://localhost:8001/api/result/${jobId}`);
               const finalResult = await resultResponse.json();
               setResult(finalResult);
+              console.log('📊 Final results received:', finalResult);
+              
+              // Auto scroll to results after a short delay
+              setTimeout(() => {
+                const resultsElement = document.getElementById('results');
+                if (resultsElement) {
+                  resultsElement.scrollIntoView({ 
+                    behavior: 'smooth',
+                    block: 'start'
+                  });
+                }
+              }, 1000);
+              
             } catch (err) {
-              console.error('Failed to get result:', err);
+              console.error('❌ Failed to get final results:', err);
+              setError('Failed to get processing results. Please try again.');
             }
           } else if (status.status === 'failed') {
             setIsProcessing(false);
-            setError(status.error_message || 'Processing failed');
+            const errorMsg = status.error_message || 'Processing failed unexpectedly';
+            setError(errorMsg);
+            console.error('❌ Processing failed:', errorMsg);
           }
         } catch (err) {
-          console.error('Failed to get status:', err);
-          setError('Failed to get processing status');
+          console.error('❌ Failed to get job status:', err);
+          setError('Lost connection to server. Please check if backend is running.');
           setIsProcessing(false);
         }
       }, 2000); // Poll every 2 seconds
     }
     
     return () => {
-      if (interval) clearInterval(interval);
+      if (interval) {
+        clearInterval(interval);
+        console.log('🛑 Stopped status polling');
+      }
     };
   }, [jobId, isProcessing]);
 
-  // Validate YouTube URL
+  // Validate YouTube URL - UPDATE: More comprehensive validation
   const isValidYouTubeUrl = (url: string): boolean => {
     const youtubePatterns = [
       /^https?:\/\/(www\.)?youtube\.com\/watch\?v=[\w-]+/,
       /^https?:\/\/(www\.)?youtu\.be\/[\w-]+/,
+      /^https?:\/\/(m\.)?youtube\.com\/watch\?v=[\w-]+/,
     ];
     return youtubePatterns.some(pattern => pattern.test(url));
   };
 
-  // Handle form submission
+  // Handle form submission - UPDATE: Better validation and error messages
   const handleProcessVideo = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Reset previous state
     setError('');
     setResult(null);
     setJobStatus(null);
     
+    // Validation
     if (!youtubeUrl.trim()) {
       setError('Please enter a YouTube URL');
       return;
     }
 
     if (!isValidYouTubeUrl(youtubeUrl)) {
-      setError('Please enter a valid YouTube URL');
+      setError('Please enter a valid YouTube URL (e.g., https://www.youtube.com/watch?v=...)');
       return;
     }
 
     if (isConnected === false) {
-      setError('Backend server is not available. Please make sure the server is running.');
+      setError('Backend server is not available. Please make sure the Python server is running on port 8001.');
       return;
     }
 
     setIsProcessing(true);
+    console.log('🚀 Starting video processing for:', youtubeUrl);
     
     try {
-      const response = await fetch(`http://localhost:8001/api/process-video?youtube_url=${encodeURIComponent(youtubeUrl)}&clip_count=5&use_ai_analysis=true`, {
+      const response = await fetch(`http://localhost:8001/api/process-video?youtube_url=${encodeURIComponent(youtubeUrl)}&clip_count=5&use_ai_analysis=true&analysis_mode=balanced`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
       
       const data = await response.json();
       
       if (data.success) {
         setJobId(data.job_id);
+        console.log('✅ Processing started successfully with job ID:', data.job_id);
       } else {
-        setError(data.message || 'Failed to start processing');
+        const errorMsg = data.detail || data.message || 'Failed to start processing';
+        setError(errorMsg);
         setIsProcessing(false);
+        console.error('❌ Failed to start processing:', errorMsg);
       }
     } catch (err: any) {
-      setError('Failed to start processing');
+      const errorMsg = 'Failed to connect to server. Please check if the backend is running.';
+      setError(errorMsg);
       setIsProcessing(false);
+      console.error('❌ Network error:', err);
     }
   };
 
-  // Reset form
+  // Reset form - UPDATE: Complete state reset
   const resetForm = () => {
+    console.log('🔄 Resetting form');
     setYoutubeUrl('');
     setJobId('');
     setJobStatus(null);
@@ -147,7 +199,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-900 text-white">
-      {/* Navigation Bar */}
+      {/* Navigation Bar - Tidak ada perubahan */}
       <nav className={`fixed w-full z-50 transition-all duration-300 ${
         isScrolled 
           ? 'bg-slate-900/95 backdrop-blur-md border-b border-slate-800' 
@@ -165,18 +217,18 @@ const App: React.FC = () => {
               </span>
             </div>
             
-            {/* Connection Status */}
+            {/* Connection Status - UPDATE: More detailed status */}
             <div className="hidden md:flex items-center space-x-4">
               <div className="flex items-center space-x-2">
                 {isConnected === true ? (
                   <>
                     <CheckCircle className="w-4 h-4 text-green-400" />
-                    <span className="text-sm text-green-400">API Connected</span>
+                    <span className="text-sm text-green-400">Backend Online</span>
                   </>
                 ) : isConnected === false ? (
                   <>
                     <XCircle className="w-4 h-4 text-red-400" />
-                    <span className="text-sm text-red-400">API Disconnected</span>
+                    <span className="text-sm text-red-400">Backend Offline</span>
                   </>
                 ) : (
                   <>
@@ -197,7 +249,7 @@ const App: React.FC = () => {
         </div>
       </nav>
 
-      {/* Hero Section */}
+      {/* Hero Section - Tidak ada perubahan */}
       <section className="min-h-screen flex items-center justify-center px-4 pt-16 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-blue-900/20 via-purple-900/20 to-pink-900/20"></div>
         
@@ -255,41 +307,61 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* Processing Section */}
+      {/* Processing Section - UPDATE: Enhanced UI and validation */}
       <section className="py-16 px-4 bg-slate-800/50" id="demo">
         <div className="max-w-2xl mx-auto">
           <h2 className="text-3xl font-bold mb-8 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent text-center">
             Try Real AI Processing
           </h2>
           
-          {/* Connection Status Alert */}
+          {/* Connection Status Alert - UPDATE: More helpful messages */}
           {isConnected === false && (
             <div className="mb-6 p-4 bg-red-900/20 border border-red-500/30 rounded-lg">
               <div className="flex items-center space-x-2">
                 <XCircle className="w-5 h-5 text-red-400" />
-                <span className="text-red-400">Backend server is not available</span>
+                <span className="text-red-400 font-semibold">Backend server is not available</span>
               </div>
               <p className="text-sm text-red-300 mt-2">
-                Make sure the Python server is running on port 8001
+                Please run: <code className="bg-red-800/30 px-2 py-1 rounded">python main.py</code> in the backend folder
               </p>
             </div>
           )}
           
-          {/* Input Form */}
+          {/* Success Connection Message */}
+          {isConnected === true && !isProcessing && !result && (
+            <div className="mb-6 p-4 bg-green-900/20 border border-green-500/30 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <CheckCircle className="w-5 h-5 text-green-400" />
+                <span className="text-green-400 font-semibold">Backend connected successfully!</span>
+              </div>
+              <p className="text-sm text-green-300 mt-2">
+                Ready to process videos with AI analysis
+              </p>
+            </div>
+          )}
+          
+          {/* Input Form - UPDATE: Better placeholder and validation */}
           <form onSubmit={handleProcessVideo} className="space-y-4">
-            <input
-              type="url"
-              placeholder="Paste YouTube URL here... (e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ)"
-              value={youtubeUrl}
-              onChange={(e) => setYoutubeUrl(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
-              disabled={isProcessing || isConnected === false}
-            />
+            <div>
+              <input
+                type="url"
+                placeholder="Paste YouTube URL here... (e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ)"
+                value={youtubeUrl}
+                onChange={(e) => setYoutubeUrl(e.target.value)}
+                className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                disabled={isProcessing || isConnected === false}
+              />
+              {youtubeUrl && !isValidYouTubeUrl(youtubeUrl) && (
+                <p className="text-xs text-red-400 mt-2">
+                  Please enter a valid YouTube URL
+                </p>
+              )}
+            </div>
             
             <div className="flex gap-3">
               <button
                 type="submit"
-                disabled={isProcessing || !youtubeUrl || isConnected === false}
+                disabled={isProcessing || !youtubeUrl || isConnected === false || !isValidYouTubeUrl(youtubeUrl)}
                 className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-2"
               >
                 {isProcessing ? (
@@ -305,7 +377,7 @@ const App: React.FC = () => {
                 )}
               </button>
               
-              {(jobId || error) && (
+              {(jobId || error || result) && (
                 <button
                   type="button"
                   onClick={resetForm}
@@ -317,35 +389,42 @@ const App: React.FC = () => {
             </div>
           </form>
           
-          {/* Error Display */}
+          {/* Error Display - UPDATE: Better error styling */}
           {error && (
             <div className="mt-4 p-4 bg-red-900/20 border border-red-500/30 rounded-lg">
               <div className="flex items-center space-x-2">
                 <XCircle className="w-5 h-5 text-red-400" />
-                <span className="text-red-400">{error}</span>
+                <span className="text-red-400 font-semibold">Error</span>
               </div>
+              <p className="text-red-300 mt-2">{error}</p>
             </div>
           )}
           
-          {/* Job Status */}
-          {jobStatus && (
+          {/* Job Status - UPDATE: Enhanced progress display */}
+          {jobStatus && isProcessing && (
             <div className="mt-6 p-4 bg-slate-700/50 backdrop-blur-sm rounded-lg border border-slate-600">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-white">Processing Status</h3>
-                <span className="text-sm text-slate-400">Job ID: {jobStatus.job_id?.slice(0, 8)}...</span>
+                <span className="text-sm text-slate-400">Job: {jobStatus.job_id?.slice(0, 8)}...</span>
               </div>
               
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-300">{jobStatus.current_step}</span>
-                  <span className="text-blue-400">{jobStatus.progress}%</span>
+                  <span className="text-blue-400 font-semibold">{jobStatus.progress}%</span>
                 </div>
                 
-                <div className="w-full bg-slate-600 rounded-full h-2">
+                <div className="w-full bg-slate-600 rounded-full h-3">
                   <div 
-                    className="bg-gradient-to-r from-blue-500 to-purple-600 h-2 rounded-full transition-all duration-500"
+                    className="bg-gradient-to-r from-blue-500 to-purple-600 h-3 rounded-full transition-all duration-500 flex items-center justify-end pr-2"
                     style={{ width: `${jobStatus.progress}%` }}
-                  ></div>
+                  >
+                    {jobStatus.progress > 15 && (
+                      <span className="text-xs text-white font-medium">
+                        {jobStatus.progress}%
+                      </span>
+                    )}
+                  </div>
                 </div>
                 
                 <div className="text-xs text-slate-400 flex items-center justify-between">
@@ -355,15 +434,16 @@ const App: React.FC = () => {
                     'text-yellow-400'
                   }`}>{jobStatus.status}</span></span>
                   
-                  {jobStatus.estimated_remaining && (
+                  {jobStatus.estimated_remaining && jobStatus.estimated_remaining > 0 && (
                     <span>~{Math.round(jobStatus.estimated_remaining)}s remaining</span>
                   )}
                 </div>
 
                 {/* AI Features Used */}
-                {jobStatus.ai_features_enabled && (
+                {jobStatus.ai_features_enabled && jobStatus.ai_features_enabled.length > 0 && (
                   <div className="text-xs text-slate-400 border-t border-slate-600 pt-2">
                     <div className="flex flex-wrap gap-1">
+                      <span className="text-slate-500">AI Features:</span>
                       {jobStatus.ai_features_enabled.map((feature: string) => (
                         <span key={feature} className="bg-slate-600 px-2 py-1 rounded text-xs">
                           {feature.replace('_', ' ')}
@@ -386,16 +466,16 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* Results Section with VideoPreview */}
+      {/* Results Section - UPDATE: Enhanced integration dengan VideoPreview */}
       {result && (
-        <section className="py-16 px-4">
+        <section className="py-16 px-4" id="results">
           <div className="max-w-7xl mx-auto">
             <VideoPreview
               videoInfo={{
-                title: result.video_info?.title || result.video_title || "Processed Video",
-                duration: result.video_info?.duration || result.video_duration || 0,
-                views: result.video_info?.views || result.video_views || 0,
-                uploader: result.video_info?.uploader || result.uploader || "Unknown"
+                title: result.video_info?.title || "Processed Video",
+                duration: result.video_info?.duration || 0,
+                views: result.video_info?.views || 0,
+                uploader: result.video_info?.uploader || "Unknown"
               }}
               clips={result.clips || []}
               youtubeUrl={youtubeUrl}
@@ -404,7 +484,7 @@ const App: React.FC = () => {
         </section>
       )}
 
-      {/* Features Section */}
+      {/* Features Section - Tidak ada perubahan */}
       <section id="features" className="py-20 px-4">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
@@ -439,7 +519,7 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* Footer */}
+      {/* Footer - Tidak ada perubahan */}
       <footer className="border-t border-slate-800 py-12 px-4">
         <div className="max-w-7xl mx-auto text-center">
           <div className="flex items-center justify-center space-x-2 mb-4">

@@ -11,7 +11,9 @@ from typing import Optional, List
 from youtube_downloader import SimpleYouTubeDownloader
 from scene_detector import SceneDetector
 from audio_analyzer import AudioAnalyzer
-
+from clip_downloader import ClipDownloader
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -33,6 +35,20 @@ app.add_middleware(
 jobs_storage = {}
 scene_detector = SceneDetector()
 audio_analyzer = AudioAnalyzer()
+clip_downloader = ClipDownloader()
+
+class ClipDownloadRequest(BaseModel):
+    video_id: str
+    clip_id: str
+    title: str
+    start_time: float
+    end_time: float
+    format: str = "mp4"
+
+class BatchDownloadRequest(BaseModel):
+    video_id: str
+    clips: list
+    format: str = "mp4"
 
 @app.on_event("startup")
 async def startup_event():
@@ -592,6 +608,114 @@ async def get_system_stats():
         "uptime": "operational",
         "timestamp": datetime.now().isoformat()
     }
+
+
+@app.post("/api/download-clip")
+async def download_single_clip(request: ClipDownloadRequest):
+    """Download a single clip"""
+    try:
+        print(f"📥 Download request for clip: {request.clip_id}")
+        
+        # Create clip info
+        clip_data = {
+            "clip_id": request.clip_id,
+            "title": request.title,
+            "start_time": request.start_time,
+            "end_time": request.end_time,
+            "duration": request.end_time - request.start_time
+        }
+        
+        clip_info = clip_downloader.create_clip_info(request.video_id, clip_data)
+        
+        # Add additional info
+        clip_info.update({
+            "download_url": clip_info["youtube_url"],
+            "suggested_filename": f"{request.title.replace(' ', '_')}_{request.clip_id}.mp4",
+            "instructions": {
+                "method_1": "Click the YouTube link to watch the clip at the specific timestamp",
+                "method_2": "Use a YouTube downloader tool with the provided URL and timestamps",
+                "method_3": "For direct download, FFmpeg integration is needed (coming soon)"
+            }
+        })
+        
+        print(f"✅ Clip download info generated: {clip_info['youtube_url']}")
+        
+        return clip_info
+        
+    except Exception as e:
+        print(f"❌ Download clip failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to prepare clip download: {str(e)}")
+
+@app.post("/api/download-batch")
+async def download_batch_clips(request: BatchDownloadRequest):
+    """Download multiple clips as batch"""
+    try:
+        print(f"📥 Batch download request for {len(request.clips)} clips")
+        
+        batch_info = clip_downloader.create_batch_download_info(request.video_id, request.clips)
+        
+        # Add instructions for batch download
+        batch_info.update({
+            "instructions": {
+                "individual_links": "Each clip has its own YouTube timestamp link",
+                "batch_method": "Use a batch YouTube downloader with the provided URLs",
+                "manual_method": "Download each clip individually using the timestamp links"
+            },
+            "download_tips": [
+                "Right-click on YouTube links and 'Open in new tab' for multiple clips",
+                "Use browser extensions like 'Video DownloadHelper' for easier downloading",
+                "For best quality, use yt-dlp with the timestamp URLs"
+            ]
+        })
+        
+        print(f"✅ Batch download info generated for {len(request.clips)} clips")
+        
+        return batch_info
+        
+    except Exception as e:
+        print(f"❌ Batch download failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to prepare batch download: {str(e)}")
+
+@app.post("/api/copy-timestamps")
+async def copy_all_timestamps(video_id: str, clips: list):
+    """Generate copyable text with all clip timestamps"""
+    try:
+        print(f"📋 Generating timestamps for {len(clips)} clips")
+        
+        timestamp_text = f"🎬 ClipCraft AI - Generated Clips\n"
+        timestamp_text += f"Original Video: https://www.youtube.com/watch?v={video_id}\n\n"
+        
+        for i, clip in enumerate(clips, 1):
+            start_time = clip.get('start_time', 0)
+            end_time = clip.get('end_time', 30)
+            title = clip.get('title', f'Clip {i}')
+            confidence = clip.get('confidence', 0.5)
+            
+            youtube_url = clip_downloader.generate_clip_url(video_id, start_time, end_time)
+            
+            timestamp_text += f"{i}. {title}\n"
+            timestamp_text += f"   ⏰ {int(start_time//60)}:{int(start_time%60):02d} - {int(end_time//60)}:{int(end_time%60):02d}\n"
+            timestamp_text += f"   🎯 Confidence: {int(confidence*100)}%\n"
+            timestamp_text += f"   🔗 {youtube_url}\n\n"
+        
+        timestamp_text += "Generated by ClipCraft AI - Turn long videos into viral clips! 🚀"
+        
+        return {
+            "success": True,
+            "total_clips": len(clips),
+            "timestamp_text": timestamp_text,
+            "instructions": "Copy the text below and share it anywhere!"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate timestamps: {str(e)}")
+    
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup when shutting down"""
+    print("🛑 Shutting down ClipCraft AI...")
+    clip_downloader.cleanup()
+    print("✅ Cleanup completed")
 
 # Run server
 if __name__ == "__main__":
